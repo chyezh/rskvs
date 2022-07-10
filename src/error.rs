@@ -74,4 +74,8 @@ pub enum KvsErrorKind {
     // indicate command not found error
     #[fail(display = "Unexpected command type")]
     UnexpectedCommandType,
+
+    // error with string message
+    #[fail(display = "{}", _0)]
+    StringError(String),
 }

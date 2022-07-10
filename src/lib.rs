@@ -1,5 +1,4 @@
-pub use error::{KvsError, KvsErrorKind, Result};
-pub use kv::KvStore;
+pub use cmd::{Cmd, Cmder};
 
-mod error;
-mod kv;
+mod cmd;
+mod resp;
