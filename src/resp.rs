@@ -3,6 +3,7 @@ use std::{
     io::{self, BufRead, Write},
 };
 
+#[derive(Debug, std::cmp::PartialEq)]
 pub enum Item {
     SimpleString(String),
 
@@ -36,7 +37,9 @@ where
 
     loop {
         match unserilize_one(reader) {
-            Ok(item) => {}
+            Ok(item) => {
+                result.push(item);
+            }
             Err(err) => break,
         }
     }
@@ -211,12 +214,33 @@ mod tests {
 
     #[test]
     fn resp_item_unserilize() {
-        let data: Vec<u8> = b"*5\r\n:1\r\n:2\r\n:3\r\n$-1\r\n$5\r\nhello\r\n"
+        let data: Vec<u8> = b"*5\r\n:1\r\n:2\r\n:3\r\n$-1\r\n$5\r\nhello\r\n*6\r\n:1\r\n:2\r\n:3\r\n$-1\r\n$5\r\nhello\r\n$-1\r\n"
             .iter()
             .map(|x| *x)
             .collect();
         let mut bufreader = io::BufReader::new(&*data);
         let v = unserilize(&mut bufreader).unwrap();
-        assert_eq!(5, v.len());
+        assert_eq!(2, v.len());
+        assert_eq!(
+            v[0],
+            Item::Array(vec![
+                Item::Integers(1),
+                Item::Integers(2),
+                Item::Integers(3),
+                Item::Null,
+                Item::BulkString(String::from("hello")),
+            ])
+        );
+        assert_eq!(
+            v[1],
+            Item::Array(vec![
+                Item::Integers(1),
+                Item::Integers(2),
+                Item::Integers(3),
+                Item::Null,
+                Item::BulkString(String::from("hello")),
+                Item::Null,
+            ])
+        );
     }
 }
