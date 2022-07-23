@@ -1,28 +1,30 @@
 use failure::Fail;
 
-use super::{Error, ErrorKind, Result};
-use std::io::{self, BufRead, Write};
+use super::{ErrorKind, Result};
+use std::{
+    io::{self, BufRead, Write},
+    num::ParseIntError,
+};
 
 #[derive(Debug, PartialEq)]
-pub enum Item {
+pub enum Resp {
     SimpleString(String),
 
     Error(String),
 
-    Integers(i64),
+    Integer(i64),
 
     BulkString(String),
 
-    Array(Vec<Item>),
+    Array(Vec<Resp>),
 
     Null,
-
-    Empty,
 }
 
+// serialize multi Resp item into writer sequentially
 pub fn serialize<I, W>(input: I, data: &mut W) -> Result<()>
 where
-    I: IntoIterator<Item = Item>,
+    I: IntoIterator<Item = Resp>,
     W: Write,
 {
     for item in input {
@@ -31,19 +33,23 @@ where
     Ok(())
 }
 
-pub fn unserilize<R>(reader: &mut R) -> Result<Vec<Item>>
+// unserilize multi Resp item into a Vec of Resp
+pub fn unserilize<R>(reader: &mut R) -> Result<Vec<Resp>>
 where
     R: BufRead,
 {
-    let mut result: Vec<Item> = Vec::new();
-
+    let mut result: Vec<Resp> = Vec::new();
     loop {
-        match unserilize_one(reader)? {
-            Item::Empty => {
-                break;
-            }
-            item => {
+        match unserilize_one(reader) {
+            Ok(item) => {
                 result.push(item);
+            }
+            Err(err) => {
+                // if touch the end of stream, return the unseriliaze result
+                if matches!(err.kind(), ErrorKind::EOS) {
+                    break;
+                }
+                return Err(err);
             }
         }
     }
@@ -51,50 +57,67 @@ where
     Ok(result)
 }
 
-fn unserilize_one<R>(reader: &mut R) -> Result<Item>
+// unserilize single string and handle utf8 convert error
+fn unseriliaze_utf8_string(v: Vec<u8>) -> Result<String> {
+    let str = String::from_utf8(v).map_err(|err| ErrorKind::Protocol(err.to_string()))?;
+
+    Ok(str)
+}
+
+// unserlize single integer and handle parsing error
+fn unserilize_integer(v: Vec<u8>) -> Result<i64> {
+    let num: i64 = unseriliaze_utf8_string(v)?
+        .parse()
+        .map_err(|err: ParseIntError| ErrorKind::Protocol(err.to_string()))?;
+
+    Ok(num)
+}
+
+// unserlize single Resp item
+fn unserilize_one<R>(reader: &mut R) -> Result<Resp>
 where
     R: BufRead,
 {
     let mut mark_buf = [0 as u8; 1];
 
     if reader.read(&mut mark_buf[..])? == 0 {
-        return Ok(Item::Empty);
+        return Err(ErrorKind::EOS.into());
     }
     match mark_buf[0] {
         b'+' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            Ok(Item::SimpleString(String::from_utf8(
+            Ok(Resp::SimpleString(unseriliaze_utf8_string(
                 buf[..buf.len() - 2].to_vec(),
             )?))
         }
         b'-' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            Ok(Item::Error(String::from_utf8(
+            Ok(Resp::Error(unseriliaze_utf8_string(
                 buf[..buf.len() - 2].to_vec(),
             )?))
         }
         b':' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            let num: i64 = String::from_utf8(buf[..buf.len() - 2].to_vec())?.parse()?;
-
-            Ok(Item::Integers(num))
+            Ok(Resp::Integer(unserilize_integer(
+                buf[..buf.len() - 2].to_vec(),
+            )?))
         }
         b'$' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            let num: i64 = String::from_utf8(buf[..buf.len() - 2].to_vec())?.parse()?;
+            let num: i64 = unserilize_integer(buf[..buf.len() - 2].to_vec())?;
 
             if num < 0 {
-                Ok(Item::Null)
+                Ok(Resp::Null)
             } else {
                 let mut buf = Vec::new();
                 buf.resize((num + 2) as usize, 0);
                 reader.read(&mut buf[..])?;
 
-                Ok(Item::BulkString(String::from_utf8(
+                Ok(Resp::BulkString(unseriliaze_utf8_string(
                     buf[..buf.len() - 2].to_vec(),
                 )?))
             }
@@ -102,47 +125,47 @@ where
         b'*' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            let num: i64 = String::from_utf8(buf[..buf.len() - 2].to_vec())?.parse()?;
+            let num: i64 = unserilize_integer(buf[..buf.len() - 2].to_vec())?;
 
             let mut items = Vec::with_capacity(num as usize);
             for _ in 0..num {
                 items.push(unserilize_one::<R>(reader)?);
             }
 
-            Ok(Item::Array(items))
+            Ok(Resp::Array(items))
         }
         _others => Err(ErrorKind::UnexpectedRespMark(_others))?,
     }
 }
 
-fn serialize_one<W>(item: &Item, writer: &mut W) -> Result<()>
+fn serialize_one<W>(item: &Resp, writer: &mut W) -> Result<()>
 where
     W: Write,
 {
     match item {
-        Item::SimpleString(s) => {
+        Resp::SimpleString(s) => {
             writer.write_all(b"+")?;
             writer.write_all(s.as_bytes())?;
             writer.write_all(b"\r\n")?;
         }
-        Item::Error(e) => {
+        Resp::Error(e) => {
             writer.write_all(b"-")?;
             writer.write_all(e.as_bytes())?;
             writer.write_all(b"\r\n")?;
         }
-        Item::Integers(i) => {
+        Resp::Integer(i) => {
             writer.write_all(b":")?;
             writer.write_all(i.to_string().as_bytes())?;
             writer.write_all(b"\r\n")?;
         }
-        Item::BulkString(s) => {
+        Resp::BulkString(s) => {
             writer.write_all(b"$")?;
             writer.write_all(s.len().to_string().as_bytes())?;
             writer.write_all(b"\r\n")?;
             writer.write_all(s.as_bytes())?;
             writer.write_all(b"\r\n")?;
         }
-        Item::Array(vs) => {
+        Resp::Array(vs) => {
             writer.write_all(b"*")?;
             writer.write_all(vs.len().to_string().as_bytes())?;
             writer.write_all(b"\r\n")?;
@@ -150,10 +173,9 @@ where
                 serialize_one(i, writer)?;
             }
         }
-        Item::Null => {
+        Resp::Null => {
             writer.write_all(b"$-1\r\n")?;
         }
-        Item::Empty => {}
     }
     Ok(())
 }
@@ -165,12 +187,12 @@ mod tests {
     #[test]
     fn resp_item_serialize() {
         let mut data = Vec::new();
-        serialize(vec![Item::SimpleString(String::from("OK"))], &mut data).unwrap();
+        serialize(vec![Resp::SimpleString(String::from("OK"))], &mut data).unwrap();
         assert_eq!(data, b"+OK\r\n");
         data.clear();
 
         serialize(
-            vec![Item::Error(String::from(
+            vec![Resp::Error(String::from(
                 "WRONGTYPE Operation against a key holding the wrong kind of value",
             ))],
             &mut data,
@@ -182,29 +204,29 @@ mod tests {
         );
         data.clear();
 
-        serialize(vec![Item::Integers(1000)], &mut data).unwrap();
+        serialize(vec![Resp::Integer(1000)], &mut data).unwrap();
         assert_eq!(data, b":1000\r\n");
         data.clear();
 
         serialize(
-            vec![Item::BulkString(String::from("hello world\r"))],
+            vec![Resp::BulkString(String::from("hello world\r"))],
             &mut data,
         )
         .unwrap();
         assert_eq!(data, b"$12\r\nhello world\r\r\n");
         data.clear();
 
-        serialize(vec![Item::Null], &mut data).unwrap();
+        serialize(vec![Resp::Null], &mut data).unwrap();
         assert_eq!(data, b"$-1\r\n");
         data.clear();
 
         serialize(
-            vec![Item::Array(vec![
-                Item::Integers(1),
-                Item::Integers(2),
-                Item::Integers(3),
-                Item::Null,
-                Item::BulkString(String::from("hello")),
+            vec![Resp::Array(vec![
+                Resp::Integer(1),
+                Resp::Integer(2),
+                Resp::Integer(3),
+                Resp::Null,
+                Resp::BulkString(String::from("hello")),
             ])],
             &mut data,
         )
@@ -224,23 +246,23 @@ mod tests {
         assert_eq!(2, v.len());
         assert_eq!(
             v[0],
-            Item::Array(vec![
-                Item::Integers(1),
-                Item::Integers(2),
-                Item::Integers(3),
-                Item::Null,
-                Item::BulkString(String::from("hello")),
+            Resp::Array(vec![
+                Resp::Integer(1),
+                Resp::Integer(2),
+                Resp::Integer(3),
+                Resp::Null,
+                Resp::BulkString(String::from("hello")),
             ])
         );
         assert_eq!(
             v[1],
-            Item::Array(vec![
-                Item::Integers(1),
-                Item::Integers(2),
-                Item::Integers(3),
-                Item::Null,
-                Item::BulkString(String::from("hello")),
-                Item::Null,
+            Resp::Array(vec![
+                Resp::Integer(1),
+                Resp::Integer(2),
+                Resp::Integer(3),
+                Resp::Null,
+                Resp::BulkString(String::from("hello")),
+                Resp::Null,
             ])
         );
     }

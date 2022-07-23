@@ -51,17 +51,17 @@ impl From<io::Error> for Error {
     }
 }
 
-impl From<FromUtf8Error> for Error {
-    fn from(err: FromUtf8Error) -> Self {
-        Error::from(ErrorKind::FromUtf8(err))
-    }
-}
-
-impl From<ParseIntError> for Error {
-    fn from(err: ParseIntError) -> Self {
-        Error::from(ErrorKind::ParseInt(err))
-    }
-}
+//impl From<FromUtf8Error> for Error {
+//    fn from(err: FromUtf8Error) -> Self {
+//        Error::from(ErrorKind::FromUtf8(err))
+//    }
+//}
+//
+//impl From<ParseIntError> for Error {
+//    fn from(err: ParseIntError) -> Self {
+//        Error::from(ErrorKind::ParseInt(err))
+//    }
+//}
 
 #[derive(Fail, Debug)]
 pub enum ErrorKind {
@@ -73,11 +73,14 @@ pub enum ErrorKind {
     #[fail(display = "Key not found")]
     KeyNotFound,
 
-    #[fail(display = "{}", _0)]
-    FromUtf8(#[cause] FromUtf8Error),
+    #[fail(display = "protocol error: {}", _0)]
+    Protocol(String),
 
-    #[fail(display = "{}", _0)]
-    ParseInt(#[cause] ParseIntError),
+    // #[fail(display = "{}", _0)]
+    // FromUtf8(#[cause] FromUtf8Error),
+
+    // #[fail(display = "{}", _0)]
+    // ParseInt(#[cause] ParseIntError),
 
     // indicate command not found error
     #[fail(display = "Unexpected command type")]
@@ -89,4 +92,7 @@ pub enum ErrorKind {
 
     #[fail(display = "Unexpected resp first bytes: {}", _0)]
     UnexpectedRespMark(u8),
+
+    #[fail(display = "end of stream")]
+    EOS,
 }
