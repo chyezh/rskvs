@@ -5,8 +5,7 @@ pub struct Parser {
     resp_iter: std::vec::IntoIter<Resp>,
 }
 
-// a iterator for parsing resp sequence
-// consume a Resp::Array item
+// Iterator for parsing resp sequence, consume a Resp::Array item
 impl Parser {
     // Create a new `Parser` to parse resp data
     pub fn new(data: Resp) -> Result<Parser> {
@@ -20,12 +19,12 @@ impl Parser {
         })
     }
 
-    // get next resp item, return end of stream error if iterating completed
+    // Get next resp item, return end of stream error if iterating completed
     fn next(&mut self) -> Result<Resp> {
         self.resp_iter.next().ok_or(ErrorKind::EOS.into())
     }
 
-    // get next string type content.
+    // Get next string type content.
     // return protocol error if next node is not string.
     pub fn next_string(&mut self) -> Result<String> {
         match self.next()? {
@@ -38,7 +37,7 @@ impl Parser {
         }
     }
 
-    // get next integer type content.
+    // Get next integer type content.
     // return protocol error if next node is not integer.
     pub fn next_integer(&mut self) -> Result<i64> {
         match self.next()? {
@@ -50,7 +49,7 @@ impl Parser {
         }
     }
 
-    // check that parsing is finish
+    // Check that parsing is finish
     pub fn check_finish(&mut self) -> Result<()> {
         if self.resp_iter.next().is_none() {
             Ok(())

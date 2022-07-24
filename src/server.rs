@@ -1,4 +1,4 @@
-use super::resp::{serialize, unserilize, Resp};
+use super::resp::{serialize, unserialize, Resp};
 use super::{Engine, Error, ErrorKind, Result};
 use tokio::net::{TcpListener, TcpStream, ToSocketAddrs};
 

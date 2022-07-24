@@ -21,7 +21,7 @@ pub enum Resp {
     Null,
 }
 
-// serialize multi Resp item into writer sequentially
+// Serialize multi Resp item into writer sequentially
 pub fn serialize<I, W>(input: I, data: &mut W) -> Result<()>
 where
     I: IntoIterator<Item = Resp>,
@@ -33,19 +33,19 @@ where
     Ok(())
 }
 
-// unserilize multi Resp item into a Vec of Resp
-pub fn unserilize<R>(reader: &mut R) -> Result<Vec<Resp>>
+// Unserialize multi Resp item into a Vec of Resp
+pub fn unserialize<R>(reader: &mut R) -> Result<Vec<Resp>>
 where
     R: BufRead,
 {
     let mut result: Vec<Resp> = Vec::new();
     loop {
-        match unserilize_one(reader) {
+        match unserialize_one(reader) {
             Ok(item) => {
                 result.push(item);
             }
             Err(err) => {
-                // if touch the end of stream, return the unseriliaze result
+                // if touch the end of stream, return the unserialize result
                 if matches!(err.kind(), ErrorKind::EOS) {
                     break;
                 }
@@ -57,24 +57,24 @@ where
     Ok(result)
 }
 
-// unserilize single string and handle utf8 convert error
-fn unseriliaze_utf8_string(v: Vec<u8>) -> Result<String> {
+// Unserialize single string and handle utf8 convert error
+fn unserialize_utf8_string(v: Vec<u8>) -> Result<String> {
     let str = String::from_utf8(v).map_err(|err| ErrorKind::Protocol(err.to_string()))?;
 
     Ok(str)
 }
 
-// unserlize single integer and handle parsing error
-fn unserilize_integer(v: Vec<u8>) -> Result<i64> {
-    let num: i64 = unseriliaze_utf8_string(v)?
+// Unserialize single integer and handle parsing error
+fn unserialize_integer(v: Vec<u8>) -> Result<i64> {
+    let num: i64 = unserialize_utf8_string(v)?
         .parse()
         .map_err(|err: ParseIntError| ErrorKind::Protocol(err.to_string()))?;
 
     Ok(num)
 }
 
-// unserlize single Resp item
-fn unserilize_one<R>(reader: &mut R) -> Result<Resp>
+// Unserlize single Resp item
+fn unserialize_one<R>(reader: &mut R) -> Result<Resp>
 where
     R: BufRead,
 {
@@ -87,28 +87,28 @@ where
         b'+' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            Ok(Resp::SimpleString(unseriliaze_utf8_string(
+            Ok(Resp::SimpleString(unserialize_utf8_string(
                 buf[..buf.len() - 2].to_vec(),
             )?))
         }
         b'-' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            Ok(Resp::Error(unseriliaze_utf8_string(
+            Ok(Resp::Error(unserialize_utf8_string(
                 buf[..buf.len() - 2].to_vec(),
             )?))
         }
         b':' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            Ok(Resp::Integer(unserilize_integer(
+            Ok(Resp::Integer(unserialize_integer(
                 buf[..buf.len() - 2].to_vec(),
             )?))
         }
         b'$' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            let num: i64 = unserilize_integer(buf[..buf.len() - 2].to_vec())?;
+            let num: i64 = unserialize_integer(buf[..buf.len() - 2].to_vec())?;
 
             if num < 0 {
                 Ok(Resp::Null)
@@ -117,7 +117,7 @@ where
                 buf.resize((num + 2) as usize, 0);
                 reader.read(&mut buf[..])?;
 
-                Ok(Resp::BulkString(unseriliaze_utf8_string(
+                Ok(Resp::BulkString(unserialize_utf8_string(
                     buf[..buf.len() - 2].to_vec(),
                 )?))
             }
@@ -125,11 +125,11 @@ where
         b'*' => {
             let mut buf = Vec::new();
             reader.read_until(b'\n', &mut buf)?;
-            let num: i64 = unserilize_integer(buf[..buf.len() - 2].to_vec())?;
+            let num: i64 = unserialize_integer(buf[..buf.len() - 2].to_vec())?;
 
             let mut items = Vec::with_capacity(num as usize);
             for _ in 0..num {
-                items.push(unserilize_one::<R>(reader)?);
+                items.push(unserialize_one::<R>(reader)?);
             }
 
             Ok(Resp::Array(items))
@@ -236,13 +236,13 @@ mod tests {
     }
 
     #[test]
-    fn resp_item_unserilize() {
+    fn resp_item_unserialize() {
         let data: Vec<u8> = b"*5\r\n:1\r\n:2\r\n:3\r\n$-1\r\n$5\r\nhello\r\n*6\r\n:1\r\n:2\r\n:3\r\n$-1\r\n$5\r\nhello\r\n$-1\r\n"
             .iter()
             .map(|x| *x)
             .collect();
         let mut bufreader = io::BufReader::new(&*data);
-        let v = unserilize(&mut bufreader).unwrap();
+        let v = unserialize(&mut bufreader).unwrap();
         assert_eq!(2, v.len());
         assert_eq!(
             v[0],
